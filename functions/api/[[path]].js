@@ -10,7 +10,16 @@ export async function onRequest({request,env,params}){
   if(p==='/auth/status'&&method==='GET')return json({authenticated:await authenticated(request,env)});
   if(p==='/auth/request'&&method==='POST'){
    const body=await request.json();const email=String(body.email||'').trim().toLowerCase();if(!(env.ADMIN_EMAIL||env.OWNER_EMAIL)||email!==(env.ADMIN_EMAIL||env.OWNER_EMAIL).toLowerCase())return json({message:'If authorized, a code will be sent.'});
-   if(!env.RESEND_API_KEY||!env.OTP_FROM_EMAIL||!env.SESSION_SECRET)return json({error:'Email configuration incomplete'},503);
+  if (!env.RESEND_API_KEY || !env.OTP_FROM_EMAIL || !env.SESSION_SECRET) {
+  return json({
+    error: 'Email configuration incomplete',
+    missing: [
+      !env.RESEND_API_KEY && 'RESEND_API_KEY',
+      !env.OTP_FROM_EMAIL && 'OTP_FROM_EMAIL',
+      !env.SESSION_SECRET && 'SESSION_SECRET'
+    ].filter(Boolean)
+  }, 503);
+  }
    const recent=await env.DB.prepare('SELECT created_at FROM otp_codes WHERE email=? ORDER BY created_at DESC LIMIT 1').bind(email).first();if(recent&&Date.now()-recent.created_at<60000)return json({error:'Wait 60 seconds before requesting another code'},429);
    const code=String(crypto.getRandomValues(new Uint32Array(1))[0]%1000000).padStart(6,'0');const digest=await hash(code+':'+env.SESSION_SECRET);await env.DB.prepare('INSERT INTO otp_codes(email,code_hash,expires_at,created_at,attempts) VALUES(?,?,?,?,0)').bind(email,digest,Date.now()+600000,Date.now()).run();
    const sent=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({from:env.OTP_FROM_EMAIL,to:[email],subject:'NEXTGEN Admin login code',text:'Your login code: '+code+' (valid 10 minutes). Do not share it.'})});if(!sent.ok)return json({error:'Email could not be sent; check Resend domain verification'},502);return json({message:'Code sent'});
