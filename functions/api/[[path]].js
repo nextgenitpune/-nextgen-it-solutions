@@ -9,7 +9,7 @@ export async function onRequest({request,env,params}){
   if(p==='/products'&&method==='GET'){const rows=await env.DB.prepare('SELECT id,name,category,description,price,image_url,warranty,created_at FROM products WHERE active=1 ORDER BY created_at DESC').all();return json({products:rows.results})}
   if(p==='/auth/status'&&method==='GET')return json({authenticated:await authenticated(request,env)});
   if(p==='/auth/request'&&method==='POST'){
-   const body=await request.json();const email=String(body.email||'').trim().toLowerCase();if(!(env.ADMIN_EMAIL||env.OWNER_EMAIL)||email!==(env.ADMIN_EMAIL||env.OWNER_EMAIL).toLowerCase())return json({message:'If authorized, a code will be sent.'});
+   const body=await request.json();const email=String(body.email||'').trim().toLowerCase();if(!(env.ADMIN_EMAIL||env.OWNER_EMAIL)||email!==(String(env.ADMIN_EMAIL||env.OWNER_EMAIL||'').trim().toLowerCase()))return json({message:'If authorized, a code will be sent.'});
   if (!env.RESEND_API_KEY || !env.OTP_FROM_EMAIL || !env.SESSION_SECRET) {
   return json({
     error: 'Email configuration incomplete',
