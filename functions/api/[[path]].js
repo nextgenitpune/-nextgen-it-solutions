@@ -20,9 +20,12 @@ const allowedCategories = ['laptop', 'desktop', 'printer', 'cctv', 'accessories'
 const productInput = b => {
   const name = String(b.name || '').trim();
   const category = String(b.category || '');
+  const brand = String(b.brand || '').trim().slice(0,80);
+  const model = String(b.model || b.name || '').trim().slice(0,150);
+  const condition = ['new','refurbished'].includes(b.condition) ? b.condition : 'new';
   const price = b.price === '' || b.price == null ? null : Number(b.price);
   if (!name || !allowedCategories.includes(category) || (price !== null && (!Number.isFinite(price) || price < 0))) return null;
-  return { name: name.slice(0, 150), category, description: String(b.description || '').slice(0, 3000), price, image_url: String(b.image_url || '').slice(0, 1000), warranty: String(b.warranty || '').slice(0, 200) };
+  return { name: name.slice(0, 150), category, brand, model, condition, description: String(b.description || '').slice(0, 3000), price, image_url: String(b.image_url || '').slice(0, 1000), warranty: String(b.warranty || '').slice(0, 200) };
 };
 
 export async function onRequest({ request, env, params }) {
@@ -32,7 +35,7 @@ export async function onRequest({ request, env, params }) {
     const method = request.method;
 
     if (path === '/products' && method === 'GET') {
-      const result = await env.DB.prepare('SELECT id,name,category,description,price,image_url,warranty,created_at FROM products WHERE active=1 ORDER BY created_at DESC').all();
+      const result = await env.DB.prepare('SELECT id,name,category,brand,model,condition,description,price,image_url,warranty,created_at FROM products WHERE active=1 ORDER BY created_at DESC').all();
       return json({ products: result.results || [] });
     }
     if (path === '/auth/status' && method === 'GET') return json({ authenticated: await isAuthenticated(request, env) });
@@ -107,8 +110,8 @@ export async function onRequest({ request, env, params }) {
       if (path === '/admin/products' && method === 'POST') {
         const b = productInput(await request.json());
         if (!b) return json({ error: 'Name, category or price invalid' }, 400);
-        await env.DB.prepare('INSERT INTO products(name,category,description,price,image_url,warranty,active,created_at) VALUES(?,?,?,?,?,?,1,?)')
-          .bind(b.name,b.category,b.description,b.price,b.image_url,b.warranty,Date.now()).run();
+        await env.DB.prepare('INSERT INTO products(name,category,brand,model,condition,description,price,image_url,warranty,active,created_at) VALUES(?,?,?,?,?,?,?,?,?, ?,?)')
+          .bind(b.name,b.category,b.brand,b.model,b.condition,b.description,b.price,b.image_url,b.warranty,1,Date.now()).run();
         return json({ ok: true }, 201);
       }
 
@@ -121,8 +124,8 @@ export async function onRequest({ request, env, params }) {
         const raw = await request.json();
         const b = productInput(raw);
         if (!b) return json({ error: 'Invalid product' }, 400);
-        await env.DB.prepare('UPDATE products SET name=?,category=?,description=?,price=?,image_url=?,warranty=?,active=? WHERE id=?')
-          .bind(b.name,b.category,b.description,b.price,b.image_url,b.warranty,raw.active === 0 ? 0 : 1,Number(match[1])).run();
+        await env.DB.prepare('UPDATE products SET name=?,category=?,brand=?,model=?,condition=?,description=?,price=?,image_url=?,warranty=?,active=? WHERE id=?')
+          .bind(b.name,b.category,b.brand,b.model,b.condition,b.description,b.price,b.image_url,b.warranty,raw.active === 0 ? 0 : 1,Number(match[1])).run();
         return json({ ok: true });
       }
     }
