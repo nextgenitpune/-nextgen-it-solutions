@@ -34,6 +34,16 @@ export async function onRequest({ request, env, params }) {
     const path = '/' + (Array.isArray(params.path) ? params.path.join('/') : (params.path || ''));
     const method = request.method;
 
+     // Public images are served through this API; R2 bucket itself stays private.
+     if (path.startsWith('/images/') && method === 'GET') {
+       if (!env.PHOTOS) return json({ error: 'R2 PHOTOS binding missing' }, 503);
+       const key = path.slice('/images/'.length);
+       if (!/^products\/[a-f0-9-]{36}\.(jpg|png|webp|gif)$/.test(key)) return json({ error: 'Invalid image' }, 400);
+       const object = await env.PHOTOS.get(key);
+       if (!object) return json({ error: 'Image not found' }, 404);
+       return new Response(object.body, { headers: { 'content-type': object.httpMetadata?.contentType || 'application/octet-stream', 'cache-control': 'public, max-age=3600', 'x-content-type-options': 'nosniff' } });
+     }
+
     if (path === '/products' && method === 'GET') {
       const result = await env.DB.prepare('SELECT id,name,category,brand,model,condition,description,price,image_url,warranty,created_at FROM products WHERE active=1 ORDER BY created_at DESC').all();
       return json({ products: result.results || [] });
@@ -101,6 +111,28 @@ export async function onRequest({ request, env, params }) {
 
     if (path.startsWith('/admin/')) {
       if (!await isAuthenticated(request, env)) return json({ error: 'Unauthorized' }, 401);
+
+       if (path === '/admin/upload-photo' && method === 'POST') {
+         if (!env.PHOTOS) return json({ error: 'R2 PHOTOS binding missing. Configure the bucket in Cloudflare Pages.' }, 503);
+         const size = Number(request.headers.get('content-length') || 0);
+         if (size > 6 * 1024 * 1024) return json({ error: 'Photo too large (max 5 MB)' }, 413);
+         const form = await request.formData();
+         const photo = form.get('photo');
+         if (!photo || typeof photo.arrayBuffer !== 'function') return json({ error: 'Select a photo' }, 400);
+         const formats = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+         const ext = formats[photo.type];
+         if (!ext) return json({ error: 'Only JPG, PNG, WebP and GIF photos are allowed' }, 400);
+         if (photo.size === 0 || photo.size > 5 * 1024 * 1024) return json({ error: 'Photo must be between 1 byte and 5 MB' }, 413);
+         const bytes = new Uint8Array(await photo.arrayBuffer());
+         const matches = ext === 'jpg' ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+           : ext === 'png' ? bytes.length >= 8 && [137,80,78,71,13,10,26,10].every((n,i)=>bytes[i]===n)
+           : ext === 'gif' ? bytes.length >= 6 && String.fromCharCode(...bytes.slice(0,6)).startsWith('GIF8')
+           : ext === 'webp' ? bytes.length >= 12 && String.fromCharCode(...bytes.slice(0,4)) === 'RIFF' && String.fromCharCode(...bytes.slice(8,12)) === 'WEBP' : false;
+         if (!matches) return json({ error: 'Invalid image file' }, 400);
+         const key = 'products/' + crypto.randomUUID() + '.' + ext;
+         await env.PHOTOS.put(key, bytes, { httpMetadata: { contentType: photo.type } });
+         return json({ url: '/api/images/' + key }, 201);
+       }
 
       if (path === '/admin/products' && method === 'GET') {
         const result = await env.DB.prepare('SELECT * FROM products ORDER BY created_at DESC').all();
